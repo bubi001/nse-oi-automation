@@ -1,0 +1,37 @@
+name: Daily NSE Participant Data Fetcher
+
+on:
+  schedule:
+    # Runs Monday to Friday at 13:45 UTC (7:15 PM IST)
+    - cron: '45 13 * * 1-5'
+  workflow_dispatch: # Enables manual execution button
+
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows the cloud machine to save the CSV back to your repo
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        pip install pandas requests
+
+    - name: Run Data Fetcher Script
+      run: python script.py
+
+    - name: Commit and Push Updated Data
+      run: |
+        git config --global user.name "NSE Auto Bot"
+        git config --global user.email "bot@github.com"
+        git add historical_participant_oi.csv
+        git commit -m "Automated update: $(date +'%Y-%m-%d')" || exit 0
+        git push
