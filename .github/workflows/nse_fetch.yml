@@ -1,66 +1,43 @@
-import datetime
-import pandas as pd
-import requests
-import io
-import os
+name: Daily NSE Participant Data Fetcher
 
-# 1. Fetch current date in IST timezone
-current_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
-date_str = current_time.strftime("%d%m%Y")
-date_iso = current_time.strftime("%Y-%m-%d")
+on:
+  schedule:
+    # Runs Monday to Friday at 13:45 UTC (7:15 PM IST)
+    - cron: '45 13 * * 1-5'
+  workflow_dispatch: # Keeps manual execution button active
 
-url = f"https://nseindia.com_{date_str}.csv"
-
-# Upgraded premium headers to bypass cloud blocking blocks
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Referer": "https://nseindia.com",
-}
-
-master_file = "historical_participant_oi.csv"
-
-try:
-    # Use a requests Session to handle cookies automatically like a real browser
-    session = requests.Session()
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
     
-    # Optional first hit to the home page to grab initial cookies if required by NSE
-    try:
-        session.get("https://nseindia.com", headers=headers, timeout=10)
-    except Exception:
-        pass # If home page times out, proceed directly to the file download
+    steps:
+    # Step 1: Load code into runner virtual machine
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-    # Download the targeted file
-    response = session.get(url, headers=headers, timeout=20)
-    
-    if response.status_code == 200:
-        df = pd.read_csv(io.StringIO(response.text), skiprows=1)
-        
-        # Clean up structures
-        df.columns = df.columns.str.strip()
-        df['Date'] = date_iso
-        
-        required_cols = ['Date', 'Client Type', 'Future Index Long', 'Future Index Short']
-        df = df[required_cols]
-        df = df[df['Client Type'] != 'TOTAL']
-        
-        if not os.path.isfile(master_file):
-            df.to_csv(master_file, index=False)
-            print("Master file initialized successfully.")
-        else:
-            existing_df = pd.read_csv(master_file)
-            if not ((existing_df['Date'] == date_iso).any()):
-                df.to_csv(master_file, mode='a', header=False, index=False)
-                print(f"Data successfully appended for {date_iso}")
-            else:
-                print(f"Data for {date_iso} already exists.")
-    else:
-        print(f"File not available on NSE servers. It could be a market holiday or past archive limit. Status code: {response.status_code}")
+    # Step 2: Install secure and clean Python runtime
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-except requests.exceptions.RequestException as req_err:
-    print(f"Network / Timeout error encountered: {req_err}")
-except Exception as e:
-    print(f"Execution Error: {e}")
+    # Step 3: Explicitly upgrade pip and force install processing dependencies
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas requests openpyxl
+
+    # Step 4: Run download handler script
+    - name: Run Data Fetcher Script
+      run: python script.py
+
+    # Step 5: Securely upload changes using administrative permissions
+    - name: Commit and Push Updated Data
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add historical_participant_oi.csv || true
+        git commit -m "Automated update: $(date +'%Y-%m-%d')" || exit 0
+        git push
