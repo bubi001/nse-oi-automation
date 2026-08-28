@@ -1,37 +1,66 @@
-name: Daily NSE Participant Data Fetcher
+import datetime
+import pandas as pd
+import requests
+import io
+import os
 
-on:
-  schedule:
-    # Runs Monday to Friday at 13:45 UTC (7:15 PM IST)
-    - cron: '45 13 * * 1-5'
-  workflow_dispatch: # Enables manual execution button
+# 1. Fetch current date in IST timezone
+current_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+date_str = current_time.strftime("%d%m%Y")
+date_iso = current_time.strftime("%Y-%m-%d")
 
-jobs:
-  fetch-and-save:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Allows the cloud machine to save the CSV back to your repo
+url = f"https://nseindia.com_{date_str}.csv"
 
-    steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+# Upgraded premium headers to bypass cloud blocking blocks
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Referer": "https://nseindia.com",
+}
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+master_file = "historical_participant_oi.csv"
 
-    - name: Install Dependencies
-      run: |
-        pip install pandas requests
+try:
+    # Use a requests Session to handle cookies automatically like a real browser
+    session = requests.Session()
+    
+    # Optional first hit to the home page to grab initial cookies if required by NSE
+    try:
+        session.get("https://nseindia.com", headers=headers, timeout=10)
+    except Exception:
+        pass # If home page times out, proceed directly to the file download
 
-    - name: Run Data Fetcher Script
-      run: python script.py
+    # Download the targeted file
+    response = session.get(url, headers=headers, timeout=20)
+    
+    if response.status_code == 200:
+        df = pd.read_csv(io.StringIO(response.text), skiprows=1)
+        
+        # Clean up structures
+        df.columns = df.columns.str.strip()
+        df['Date'] = date_iso
+        
+        required_cols = ['Date', 'Client Type', 'Future Index Long', 'Future Index Short']
+        df = df[required_cols]
+        df = df[df['Client Type'] != 'TOTAL']
+        
+        if not os.path.isfile(master_file):
+            df.to_csv(master_file, index=False)
+            print("Master file initialized successfully.")
+        else:
+            existing_df = pd.read_csv(master_file)
+            if not ((existing_df['Date'] == date_iso).any()):
+                df.to_csv(master_file, mode='a', header=False, index=False)
+                print(f"Data successfully appended for {date_iso}")
+            else:
+                print(f"Data for {date_iso} already exists.")
+    else:
+        print(f"File not available on NSE servers. It could be a market holiday or past archive limit. Status code: {response.status_code}")
 
-    - name: Commit and Push Updated Data
-      run: |
-        git config --global user.name "NSE Auto Bot"
-        git config --global user.email "bot@github.com"
-        git add historical_participant_oi.csv
-        git commit -m "Automated update: $(date +'%Y-%m-%d')" || exit 0
-        git push
+except requests.exceptions.RequestException as req_err:
+    print(f"Network / Timeout error encountered: {req_err}")
+except Exception as e:
+    print(f"Execution Error: {e}")
