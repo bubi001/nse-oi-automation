@@ -5,10 +5,9 @@ import io
 import os
 
 # Calculate exact Indian Standard Time execution windows
-current_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
-date_str = current_time.strftime("%d%m%Y")
-date_iso = current_time.strftime("%Y-%m-%d")
-
+# Temporary test override for Friday's market data
+date_str = "28082026"
+date_iso = "2026-08-28"
 url = f"https://archives.nseindia.com/content/nsccl/fao_participant_oi_{date_str}.csv"
 
 # Emulate structured human traffic metrics
